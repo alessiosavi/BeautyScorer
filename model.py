@@ -1,9 +1,12 @@
+import random
+
 import torch
 import torch.nn as nn
 from torchvision.models import MobileNet_V3_Large_Weights, mobilenet_v3_large
-import utils
 from tqdm.auto import tqdm
-import random
+
+import utils
+
 
 class BeautyScoreModel(nn.Module):
     def __init__(
@@ -128,8 +131,9 @@ def predict(model, photos_tensor, photos_mask, faces_tensor, faces_mask):
     model.train()
     return predicted_scores, probabilities
 
-def score_person(person_id, model):
-    batch = utils.load_data(person_id)
+
+def score_person(person_id, model, basepath):
+    batch = utils.load_data(person_id, basepath)
     score, probability = predict(model, **batch)
     score = score.detach().to("cpu").item()
     probability = probability.detach().to("cpu").squeeze(0)

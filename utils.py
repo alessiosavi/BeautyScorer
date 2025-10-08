@@ -7,9 +7,11 @@ import yaml
 from deepface import DeepFace
 from matplotlib import pyplot as plt
 from PIL import Image
+from torch.utils.data import DataLoader
 from torchvision.io import decode_image
 
 import dataset
+
 MIN_SCORE = 1
 
 
@@ -115,7 +117,7 @@ def load_data(person_id, basepath, device=torch.device("cpu")):
     images = list(glob(f"{basepath}/{person_id}/*"))
     d = [{"id": person_id, "score": 0, "photos": images}]
     ds = dataset.BeautyDataset(d)
-    dl = dataset.DataLoader(ds, batch_size=1, pin_memory=True, collate_fn=ds.collate_fn)
+    dl = DataLoader(ds, batch_size=1, pin_memory=True, collate_fn=ds.collate_fn)
     batch = next(iter(dl))
     for k in batch:
         batch[k] = batch[k].to(device) if torch.is_tensor(batch[k]) else batch[k]
@@ -130,5 +132,3 @@ def show_person(person_id, basepath, n=9):
         show_img(photo, person_id)
         for photo in random.sample(images, k=min(n, len(images)))
     ]
-
-
