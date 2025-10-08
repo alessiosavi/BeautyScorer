@@ -1,0 +1,8 @@
+deepface==0.0.95
+matplotlib==3.10.6
+numpy==2.3.3
+Pillow==11.3.0
+PyYAML==6.0.3
+torch==2.8.0+cu129
+torchvision==0.23.0+cu129
+tqdm==4.67.1

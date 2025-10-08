@@ -1,0 +1,24 @@
+
+# Channel, height and width for the photos
+C: 3
+H: 224
+W: 224
+
+# Height and width for the extracted faces
+F_H: 224
+F_W: 224
+
+# Max photos allowed for score a person
+N_MAX: 9
+# Number of classes (scores)
+N_CLASSES: 9
+
+DATASET_FILE: 'datasets/beauty_dataset.csv'
+
+
+# Training params
+BATCH_SIZE: 32
+LR: 0.0001
+EPOCHS: 10
+MODEL: 'models/model_v8_classes_big_finetuned_state_dict.pt'
+PATIENCE: 2
