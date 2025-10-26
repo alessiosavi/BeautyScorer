@@ -6,3 +6,4 @@ PyYAML==6.0.3
 torch==2.8.0+cu129
 torchvision==0.23.0+cu129
 tqdm==4.67.1
+ultralytics==8.3.216

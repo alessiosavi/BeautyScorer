@@ -1,4 +1,5 @@
 import random
+from typing import Dict, Union
 
 import torch
 import torch.nn as nn
@@ -15,8 +16,8 @@ class BeautyScoreModel(nn.Module):
         num_encoder_layers=4,
         num_heads=8,
         ff_dim=2048,
-        dropout=0.2,
-        conf=None,
+        dropout=0.3,
+        conf: Dict[str, Union[int, float, str]] = {},
     ):
         super().__init__()
         mobilenet = mobilenet_v3_large(weights=MobileNet_V3_Large_Weights.DEFAULT)
@@ -33,7 +34,7 @@ class BeautyScoreModel(nn.Module):
         self.feature_dim = 960
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.photo_proj = nn.Linear(self.feature_dim, embed_dim)
-        self.face_proj = nn.Linear(self.feature_dim, embed_dim)
+        self.face_proj = nn.Linear(128, embed_dim)
         self.photo_cls = nn.Parameter(torch.randn(1, 1, embed_dim))
         self.face_cls = nn.Parameter(torch.randn(1, 1, embed_dim))
         encoder_layer = nn.TransformerEncoderLayer(
@@ -51,35 +52,44 @@ class BeautyScoreModel(nn.Module):
         )
         self.mlp = nn.Sequential(
             nn.Linear(2 * embed_dim, 512),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(512, self.conf["N_CLASSES"]),
         )
 
     def forward(self, photos_tensor, photos_mask, faces_tensor, faces_mask):
+        print('1')
         batch_size = photos_tensor.size(0)
+        print('2')
         photos_flat = photos_tensor.view(
             batch_size * self.conf["N_MAX"],
             self.conf["C"],
             self.conf["H"],
             self.conf["W"],
         )
-        faces_flat = faces_tensor.view(
-            batch_size * self.conf["N_MAX"],
-            self.conf["C"],
-            self.conf["F_H"],
-            self.conf["F_W"],
-        )
+        print('3')
+        # faces_flat = faces_tensor.view(
+        #     batch_size * self.conf["N_MAX"],
+        #     self.conf["C"],
+        #     self.conf["F_H"],
+        #     self.conf["F_W"],
+        # )
         photo_feats_flat = self.feature_extractor(photos_flat)
-        face_feats_flat = self.feature_extractor(faces_flat)
+        print('4')
+        # face_feats_flat = self.feature_extractor(faces_flat)
 
         photo_feats_pooled = self.pool(photo_feats_flat).view(-1, self.feature_dim)
+        print('5')
         photo_feats = photo_feats_pooled.view(
             batch_size, -1, self.feature_dim
         )  # note: 9 to -1 for general
+        print('6')
         photo_emb = self.photo_proj(photo_feats)
+        print('7')
         cls_photo = self.photo_cls.repeat(batch_size, 1, 1)
+        print('8')
         photo_input = torch.cat([cls_photo, photo_emb], dim=1)
+        print('9')
         photo_padding_mask = torch.cat(
             [
                 torch.zeros(batch_size, 1, dtype=torch.bool, device=photos_mask.device),
@@ -87,16 +97,22 @@ class BeautyScoreModel(nn.Module):
             ],
             dim=1,
         )
+        print('10')
         photo_encoded = self.photo_encoder(
             photo_input.transpose(0, 1), src_key_padding_mask=photo_padding_mask
         ).transpose(0, 1)
+        print('11')
         photo_vec = photo_encoded[:, 0, :]
+        print('12')
 
-        face_feats_pooled = self.pool(face_feats_flat).view(-1, self.feature_dim)
-        face_feats = face_feats_pooled.view(batch_size, -1, self.feature_dim)
-        face_emb = self.face_proj(face_feats)
+        # face_feats_pooled = self.pool(face_feats_flat).view(-1, self.feature_dim)
+        # face_feats = face_feats_pooled.view(batch_size, -1, self.feature_dim)
+        face_emb = self.face_proj(faces_tensor)
+        print('13')
         cls_face = self.face_cls.repeat(batch_size, 1, 1)
+        print('14')
         face_input = torch.cat([cls_face, face_emb], dim=1)
+        print('15')
         face_padding_mask = torch.cat(
             [
                 torch.zeros(batch_size, 1, dtype=torch.bool, device=faces_mask.device),
@@ -104,12 +120,17 @@ class BeautyScoreModel(nn.Module):
             ],
             dim=1,
         )
+        print('16')
         face_encoded = self.face_encoder(
             face_input.transpose(0, 1), src_key_padding_mask=face_padding_mask
         ).transpose(0, 1)
+        print('17')
         face_vec = face_encoded[:, 0, :]
+        print('18')
         combined = torch.cat([photo_vec, face_vec], dim=1)
+        print('19')
         score = self.mlp(combined)
+        print('20')
         return score
 
 
@@ -145,12 +166,12 @@ def score_person(person_id, model, basepath):
     return score, probs
 
 
-def score_persons(batch, model, k=5):
+def score_persons(batch, model, k=5, basepath=None):
     max_len = len(batch["ids"])
     sample_ids = random.sample(list(range(max_len)), k=min(max_len, k))
     for idx in tqdm(sample_ids):
         person = batch["ids"][idx]
-        score, probability = score_person(person, model)
+        score, probability = score_person(person, model, basepath)
         print(
             f"Person: {person} -> Score: {score} | Prob: {probability} | RealScore: {batch['scores'][idx]}"
         )

@@ -14,7 +14,7 @@ N_MAX: 9
 N_CLASSES: 9
 
 DATASET_FILE: 'datasets/beauty_dataset.csv'
-
+DATASET_PHOTO_BASEPATH: '/media/ground0/31E7643363A5E093/opt/SP/dataset/beauty_dataset'
 
 # Training params
 BATCH_SIZE: 32

@@ -1,5 +1,6 @@
 import random
 from glob import glob
+from typing import Dict, Union
 
 import numpy as np
 import torch
@@ -73,13 +74,25 @@ def extract_face(img, threshold=0.3):
     res = DeepFace.extract_faces(
         img,
         color_face="bgr",
-        detector_backend="yolov8",
+        detector_backend="yolov12l",
         enforce_detection=False,
         expand_percentage=50,
     )
     if len(res) != 1 or res[0]["confidence"] < threshold:
         return None
     return torch.from_numpy(res[0]["face"])
+
+
+def get_face_embedding(img: str, threshold=0.3):
+    res = DeepFace.represent(
+        img,
+        detector_backend="yolov12l",
+        model_name="Dlib",
+        enforce_detection=False,
+    )
+    if len(res) != 1 or res[0]["face_confidence"] < threshold:
+        return None
+    return torch.Tensor(res[0]["embedding"])
 
 
 def compute_class_weights(df):
