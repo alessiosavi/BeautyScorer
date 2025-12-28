@@ -381,6 +381,7 @@ class AttentionPooling(nn.Module):
             return self.norm(output.squeeze(1))
 
         # Slow path: handle per-sample invalid masks
+        # Use same dtype as input to handle AMP correctly
         output = torch.zeros(batch_size, embed_dim, device=x.device, dtype=x.dtype)
 
         # Process valid samples with attention
@@ -398,12 +399,13 @@ class AttentionPooling(nn.Module):
                 value=x_valid,
                 key_padding_mask=key_mask,
             )
-            output[valid_idx] = attn_out.squeeze(1)
+            # Cast to output dtype for AMP compatibility (attention may output float16)
+            output[valid_idx] = attn_out.squeeze(1).to(output.dtype)
 
         # Process invalid samples with mean pooling
         if any_invalid:
             invalid_idx = (~has_valid).nonzero(as_tuple=True)[0]
-            output[invalid_idx] = x[invalid_idx].mean(dim=1)
+            output[invalid_idx] = x[invalid_idx].mean(dim=1).to(output.dtype)
 
         return self.norm(output)
 
@@ -484,6 +486,7 @@ class LightweightAttention(nn.Module):
             return self.norm(output)
 
         # Slow path: handle per-sample invalid masks
+        # Use same dtype as input to handle AMP correctly
         output = torch.zeros(batch_size, embed_dim, device=device, dtype=dtype)
 
         # Process valid samples with attention
@@ -505,12 +508,13 @@ class LightweightAttention(nn.Module):
             attn = self.dropout(attn)
 
             attn_output = torch.matmul(attn, v).squeeze(1)
-            output[valid_idx] = attn_output
+            # Cast to output dtype for AMP compatibility (attention may output float16)
+            output[valid_idx] = attn_output.to(output.dtype)
 
         # Process invalid samples with mean pooling (over all positions)
         if any_invalid:
             invalid_idx = (~has_valid).nonzero(as_tuple=True)[0]
             # Use mean of input embeddings (which are zeros for invalid, but this is safe)
-            output[invalid_idx] = x[invalid_idx].mean(dim=1)
+            output[invalid_idx] = x[invalid_idx].mean(dim=1).to(output.dtype)
 
         return self.norm(output)
