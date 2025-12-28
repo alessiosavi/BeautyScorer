@@ -109,9 +109,10 @@ class Trainer:
             warmup_epochs=self.config.scheduler_warmup_epochs,
         )
 
-        # AMP
+        # AMP with improved NaN handling
         self.use_amp = self.config.use_amp and self.device.type == "cuda"
-        self.scaler = GradScaler() if self.use_amp else None
+        # GradScaler automatically handles Inf/NaN gradients by skipping optimizer step
+        self.scaler = GradScaler(enabled=self.use_amp) if self.use_amp else None
 
         # Callbacks
         self.callbacks = CallbackList(callbacks or [])
@@ -158,8 +159,29 @@ class Trainer:
             # Forward pass with AMP
             with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
                 logits = self.model(photos, photos_mask, faces, faces_mask)
+
+                # Check for NaN in logits (early detection)
+                if torch.isnan(logits).any() or torch.isinf(logits).any():
+                    logger.warning(
+                        f"NaN/Inf in model output at batch {batch_idx}, skipping. "
+                        f"faces_valid={faces_mask.any(dim=1).sum()}/{faces_mask.size(0)}, "
+                        f"photos_valid={photos_mask.any(dim=1).sum()}/{photos_mask.size(0)}"
+                    )
+                    self.optimizer.zero_grad()
+                    continue
+
                 loss = self.criterion(logits, targets)
                 loss = loss / accumulation_steps
+
+            # Check for NaN/Inf loss and skip batch if detected
+            if torch.isnan(loss) or torch.isinf(loss):
+                logger.warning(
+                    f"NaN/Inf loss detected at batch {batch_idx}, skipping. "
+                    f"faces_valid={faces_mask.any(dim=1).sum()}/{faces_mask.size(0)}, "
+                    f"photos_valid={photos_mask.any(dim=1).sum()}/{photos_mask.size(0)}"
+                )
+                self.optimizer.zero_grad()
+                continue
 
             # Backward pass
             if self.scaler:

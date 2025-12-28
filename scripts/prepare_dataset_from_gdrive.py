@@ -34,7 +34,7 @@ from queue import Queue
 from typing import Any
 
 import pandas as pd
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 # Google Drive API imports
 try:

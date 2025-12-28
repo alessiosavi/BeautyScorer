@@ -10,7 +10,7 @@ model:
   ff_dim: 3072
   dropout: 0.1
   num_classes: 9
-  unfreeze_backbone_layers: 4  # Fine-tune last layers
+  unfreeze_backbone_layers:   # Fine-tune last layers
   use_positional_encoding: true  # ViT uses positional encoding
   use_cross_attention: true
   use_se_attention: true
@@ -34,7 +34,7 @@ training:
   scheduler_warmup_epochs: 5
   val_split: 0.15
   seed: 42
-  num_workers: 8
+  num_workers: 2
   pin_memory: true
 
 data:
@@ -54,8 +54,8 @@ data:
   # balance_strategy: undersample  # 'undersample', 'sqrt', or 'proportional'
 
 paths:
-  dataset_file: data/dataset.csv
-  dataset_base_path: /opt/SP/DATA/beauty_dataset
+  dataset_file: dataset.csv
+  dataset_base_path: beauty_dataset
   output_dir: outputs/advanced
   checkpoint_path:
   export_dir: exports

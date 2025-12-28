@@ -262,24 +262,46 @@ class CrossAttentionFusion(nn.Module):
         photo_key_mask = ~photo_mask if photo_mask is not None else None
         face_key_mask = ~face_mask if face_mask is not None else None
 
-        # Photo attends to faces
-        photo_attn_out, _ = self.photo_to_face_attn(
-            query=photo_features,
-            key=face_features,
-            value=face_features,
-            key_padding_mask=face_key_mask,
-        )
-        photo_features = self.norm_photo(photo_features + photo_attn_out)
+        # Check for samples with no valid faces (would cause NaN in attention)
+        # For these samples, skip cross-attention and use identity
+        if face_mask is not None:
+            has_valid_faces = face_mask.any(dim=1)  # (batch,)
+            all_have_faces = has_valid_faces.all()
+        else:
+            all_have_faces = True
+
+        if face_mask is not None:
+            has_valid_photos = photo_mask.any(dim=1) if photo_mask is not None else None
+            all_have_photos = has_valid_photos.all() if has_valid_photos is not None else True
+        else:
+            all_have_photos = True
+
+        # Photo attends to faces (skip if any sample has no valid faces)
+        if all_have_faces:
+            photo_attn_out, _ = self.photo_to_face_attn(
+                query=photo_features,
+                key=face_features,
+                value=face_features,
+                key_padding_mask=face_key_mask,
+            )
+            photo_features = self.norm_photo(photo_features + photo_attn_out)
+        else:
+            # Skip attention for samples without faces, apply norm only
+            photo_features = self.norm_photo(photo_features)
         photo_features = self.norm_photo_ff(photo_features + self.ff_photo(photo_features))
 
-        # Face attends to photos
-        face_attn_out, _ = self.face_to_photo_attn(
-            query=face_features,
-            key=photo_features,
-            value=photo_features,
-            key_padding_mask=photo_key_mask,
-        )
-        face_features = self.norm_face(face_features + face_attn_out)
+        # Face attends to photos (skip if any sample has no valid photos)
+        if all_have_photos:
+            face_attn_out, _ = self.face_to_photo_attn(
+                query=face_features,
+                key=photo_features,
+                value=photo_features,
+                key_padding_mask=photo_key_mask,
+            )
+            face_features = self.norm_face(face_features + face_attn_out)
+        else:
+            # Skip attention for samples without photos, apply norm only
+            face_features = self.norm_face(face_features)
         face_features = self.norm_face_ff(face_features + self.ff_face(face_features))
 
         return photo_features, face_features
@@ -395,32 +417,65 @@ class LightweightAttention(nn.Module):
         Returns:
             Pooled representation (batch, embed_dim).
         """
-        # Handle empty mask case (no valid tokens) by falling back to mean pooling
+        batch_size, seq_len, embed_dim = x.shape
+        device = x.device
+        dtype = x.dtype
+
+        # Check which samples have valid tokens
         if mask is not None:
-            # Check for samples with no valid tokens
-            valid_counts = mask.sum(dim=1)
-            all_invalid = valid_counts == 0
-            if all_invalid.any():
-                # For samples with no valid tokens, use mean pooling
-                output = x.mean(dim=1)
-                output = self.norm(output)
-                return output
+            valid_counts = mask.sum(dim=1)  # (batch,)
+            has_valid = valid_counts > 0  # (batch,)
+            all_valid = has_valid.all()
+            any_invalid = (~has_valid).any()
+        else:
+            all_valid = True
+            any_invalid = False
 
-        q = self.query(x.mean(dim=1, keepdim=True))  # Global query
-        k = self.key(x)
-        v = self.value(x)
+        # Fast path: all samples have valid tokens
+        if all_valid:
+            q = self.query(x.mean(dim=1, keepdim=True))
+            k = self.key(x)
+            v = self.value(x)
 
-        # Attention scores
-        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+            scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
 
-        # Apply mask
-        if mask is not None:
-            scores = scores.masked_fill(~mask.unsqueeze(1), float("-inf"))
+            if mask is not None:
+                scores = scores.masked_fill(~mask.unsqueeze(1), float("-inf"))
 
-        attn = F.softmax(scores, dim=-1)
-        attn = self.dropout(attn)
+            attn = F.softmax(scores, dim=-1)
+            attn = self.dropout(attn)
 
-        output = torch.matmul(attn, v).squeeze(1)
-        output = self.norm(output)
+            output = torch.matmul(attn, v).squeeze(1)
+            return self.norm(output)
 
-        return output
+        # Slow path: handle per-sample invalid masks
+        output = torch.zeros(batch_size, embed_dim, device=device, dtype=dtype)
+
+        # Process valid samples with attention
+        if has_valid.any():
+            valid_idx = has_valid.nonzero(as_tuple=True)[0]
+            x_valid = x[valid_idx]
+            mask_valid = mask[valid_idx] if mask is not None else None
+
+            q = self.query(x_valid.mean(dim=1, keepdim=True))
+            k = self.key(x_valid)
+            v = self.value(x_valid)
+
+            scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+            if mask_valid is not None:
+                scores = scores.masked_fill(~mask_valid.unsqueeze(1), float("-inf"))
+
+            attn = F.softmax(scores, dim=-1)
+            attn = self.dropout(attn)
+
+            attn_output = torch.matmul(attn, v).squeeze(1)
+            output[valid_idx] = attn_output
+
+        # Process invalid samples with mean pooling (over all positions)
+        if any_invalid:
+            invalid_idx = (~has_valid).nonzero(as_tuple=True)[0]
+            # Use mean of input embeddings (which are zeros for invalid, but this is safe)
+            output[invalid_idx] = x[invalid_idx].mean(dim=1)
+
+        return self.norm(output)
