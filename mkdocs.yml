@@ -1,0 +1,80 @@
+# MkDocs configuration for BeautyScorer
+# https://www.mkdocs.org/user-guide/configuration/
+
+site_name: BeautyScorer
+site_description: Professional Deep Learning framework for facial beauty scoring
+site_author: BeautyScorer Team
+site_url: https://alessiosavi.github.io/BeautyScorer/
+
+# Repository
+repo_name: alessiosavi/BeautyScorer
+repo_url: https://github.com/alessiosavi/BeautyScorer
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2025 alessiosavi
+
+# Configuration
+theme:
+  name: readthedocs
+  locale: en
+  highlightjs: true
+  hljs_languages:
+    - python
+    - yaml
+    - bash
+  prev_next_buttons_location: both
+  navigation_depth: 4
+  collapse_navigation: true
+  titles_only: false
+  sticky_navigation: true
+  include_homepage_in_sidebar: true
+
+# Extensions
+markdown_extensions:
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - admonition
+  - codehilite:
+      guess_lang: false
+      linenums: false
+  - footnotes
+  - meta
+  - def_list
+  - attr_list
+  - tables
+  - fenced_code
+
+# Plugins
+plugins:
+  - search
+
+# Navigation
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quickstart: QUICKSTART.md
+    - Configuration: CONFIGURATION.md
+  - User Guide:
+    - Architecture: ARCHITECTURE.md
+    - API Reference: API.md
+  - Development:
+    - Development Guide: DEVELOPMENT.md
+    - Changelog: CHANGELOG.md
+
+# Extra
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/alessiosavi/BeautyScorer
+  generator: false
+
+# Extra CSS
+extra_css:
+  - css/extra.css
+
+# Extra JavaScript
+extra_javascript: []

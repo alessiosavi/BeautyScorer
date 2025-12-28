@@ -1,0 +1,67 @@
+# BeautyScorer Default Configuration
+# This config provides balanced settings for GPU training with the MobileNet+Transformer model
+
+model:
+  architecture: mobilenet_transformer
+  backbone: mobilenet_v3_large
+  embed_dim: 512
+  num_encoder_layers: 4
+  num_heads: 8
+  ff_dim: 2048
+  dropout: 0.2
+  num_classes: 9
+  unfreeze_backbone_layers: 4  # Unfreeze last 4 blocks for fine-tuning
+  use_positional_encoding: false
+  use_cross_attention: true
+  use_se_attention: true
+  use_gradient_checkpointing: false
+  pretrained: true
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  backbone_lr_multiplier: 0.1
+  weight_decay: 0.01
+  epochs: 50
+  patience: 5
+  label_smoothing: 0.1
+  use_amp: true
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  loss_function: cross_entropy
+  focal_gamma: 2.0
+  scheduler: cosine
+  scheduler_warmup_epochs: 2
+  val_split: 0.1
+  seed: 42
+  num_workers: 4
+  pin_memory: true
+
+data:
+  image_size: [224, 224]
+  face_size: [224, 224]
+  max_photos: 9
+  augmentation: true
+  augmentation_strength: medium
+  face_detector: yolov8
+  face_expand_percentage: 50
+  face_confidence_threshold: 0.3
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+
+paths:
+  dataset_file: datasets/beauty_dataset.csv
+  dataset_base_path: datasets/images
+  output_dir: outputs
+  checkpoint_path:
+  export_dir: exports
+
+logging:
+  log_level: INFO
+  log_dir: logs
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: beauty-scorer
+  wandb_entity:
+  log_every_n_steps: 10
+  save_every_n_epochs: 1

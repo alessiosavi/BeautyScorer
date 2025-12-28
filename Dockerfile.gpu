@@ -1,0 +1,133 @@
+# =============================================================================
+# BeautyScorer - GPU Docker Image (CUDA)
+# =============================================================================
+# Multi-stage build with NVIDIA CUDA support
+#
+# Build:
+#   docker build -t beauty-scorer:latest-gpu -f Dockerfile.gpu .
+#
+# Run:
+#   docker run -it --rm --gpus all \
+#     -v $(pwd)/datasets:/app/datasets \
+#     beauty-scorer:latest-gpu
+#
+# Requirements:
+#   - NVIDIA GPU with CUDA support
+#   - NVIDIA Container Toolkit (nvidia-docker2)
+#   - Docker >= 19.03
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04 AS builder
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install Python and build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
+    build-essential \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+WORKDIR /build
+
+# Copy only dependency files first for better caching
+COPY pyproject.toml .
+COPY README.md .
+
+# Install PyTorch with CUDA support
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Install the package with all dependencies
+RUN pip install -e ".[dev,tensorboard]"
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS runtime
+
+# Labels
+LABEL maintainer="Alessio Savi" \
+    version="1.0.0" \
+    description="BeautyScorer - Deep learning model for beauty score prediction (GPU/CUDA)" \
+    org.opencontainers.image.source="https://github.com/alessiosavi/BeautyScorer"
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH" \
+    DEBIAN_FRONTEND=noninteractive \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install Python and runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
+# Set up application directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=appuser:appuser beauty_scorer/ ./beauty_scorer/
+COPY --chown=appuser:appuser scripts/ ./scripts/
+COPY --chown=appuser:appuser configs/ ./configs/
+COPY --chown=appuser:appuser pyproject.toml README.md ./
+
+# Create directories for data and outputs
+RUN mkdir -p datasets outputs exports logs && \
+    chown -R appuser:appuser /app
+
+# Install package in development mode
+RUN pip install -e .
+
+# Switch to non-root user
+USER appuser
+
+# Health check - verify CUDA is available
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print('OK')" || exit 1
+
+# Default command - show GPU info
+CMD ["python", "-c", "import torch; print(f'BeautyScorer GPU ready! CUDA: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"]

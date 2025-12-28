@@ -1,0 +1,67 @@
+# BeautyScorer CPU Training Configuration
+# Optimized for CPU training with the lightweight model
+
+model:
+  architecture: lightweight_cpu
+  backbone: efficientnet_lite0
+  embed_dim: 256  # Smaller embedding for CPU efficiency
+  num_encoder_layers: 2  # Fewer layers
+  num_heads: 4  # Fewer attention heads
+  ff_dim: 1024
+  dropout: 0.2
+  num_classes: 9
+  unfreeze_backbone_layers: 0  # Keep backbone frozen for speed
+  use_positional_encoding: false
+  use_cross_attention: false  # Disable for CPU efficiency
+  use_se_attention: false  # Disable SE blocks for CPU
+  use_gradient_checkpointing: false
+  pretrained: true
+
+training:
+  batch_size: 8  # Smaller batch for CPU memory
+  learning_rate: 0.0001
+  backbone_lr_multiplier: 0.0  # Keep backbone frozen
+  weight_decay: 0.01
+  epochs: 30
+  patience: 7
+  label_smoothing: 0.1
+  use_amp: false  # Disable AMP for CPU
+  gradient_accumulation_steps: 4  # Simulate larger batch
+  max_grad_norm: 1.0
+  loss_function: cross_entropy
+  focal_gamma: 2.0
+  scheduler: cosine
+  scheduler_warmup_epochs: 1
+  val_split: 0.1
+  seed: 42
+  num_workers: 2  # Fewer workers for CPU
+  pin_memory: false  # Disable for CPU
+
+data:
+  image_size: [224, 224]
+  face_size: [112, 112]  # Smaller face crops for speed
+  max_photos: 6  # Fewer photos to process
+  augmentation: true
+  augmentation_strength: light  # Lighter augmentation
+  face_detector: opencv  # Faster face detection for CPU
+  face_expand_percentage: 30
+  face_confidence_threshold: 0.5
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+
+paths:
+  dataset_file: datasets/beauty_dataset.csv
+  dataset_base_path: datasets/images
+  output_dir: outputs/cpu
+  checkpoint_path:
+  export_dir: exports
+
+logging:
+  log_level: INFO
+  log_dir: logs/cpu
+  use_tensorboard: false
+  use_wandb: false
+  wandb_project: beauty-scorer
+  wandb_entity:
+  log_every_n_steps: 20
+  save_every_n_epochs: 2

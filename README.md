@@ -1,136 +1,304 @@
-# BeautyScorer: A Permutation-Invariant Beauty Scoring Neural Network
+# BeautyScorer
 
-## Overview
+A professional deep learning framework for predicting beauty scores (1-9) from photos using transformer-based multi-image aggregation.
 
-BeautyScoreModel is a deep learning model designed to predict beauty scores (as integers from 1 to 9) for individuals based on up to 9 photos and corresponding face crops. The model treats the problem as a multi-class classification task, outputting probabilities over 9 classes. It is built using PyTorch and leverages pre-trained `MobileNetV3` for feature extraction, transformer encoders for aggregating variable-length inputs, and an MLP head for final prediction.
+## Features
 
-Key features:
-
-- **Input Handling**: Supports variable numbers of photos and faces (up to 9 each), with padding and masks to handle fewer inputs.
-- **Permutation Invariance**: The order of photos/faces does not affect the output, making it robust to shuffling (a "hidden gem" for set-based inputs like photo collections).
-- **Efficiency**: Uses lightweight components for faster training/inference.
-- **Adaptability**: Fine-tuned for beauty scoring, with options for handling class imbalance and further fine-tuning on expanded datasets.
-
-This repository includes the model implementation, preprocessing utilities, training/fine-tuning scripts, and inference examples.
-
-## Architecture
-
-The model processes photos and faces separately before fusing their representations. Here's a high-level breakdown:
-
-1. **Feature Extraction (`MobileNetV3`)**:
-   - A pre-trained `MobileNetV3` (features only, no classifier) extracts spatial features from each image.
-   - Input: RGB images resized to 224x224.
-   - Output per image: A feature map `[960, 7, 7]`, pooled to `[960]` via adaptive average pooling.
-   - **Technical Choice**: `MobileNetV3` is lightweight (efficient convolutions with depthwise separables) and pre-trained on ImageNet, providing strong generic features.
-   - **Peculiarity**: Shared extractor for photos and faces, but separate downstream processing allows specialization.
-
-2. **Projection Layers**:
-   - Linear layers map the 960-D features to an embedding dimension (default: 512).
-   - **Technical Choice**: Dimensionality reduction improves efficiency (transformer attention scales quadratically with dimension) and acts as a learnable adapter for task-specific features (e.g., beauty-related traits vs. ImageNet objects).
-   - **Why Not Skip?**: Direct 960-D input would increase compute; projection creates a bottleneck for better generalization.
-
-3. **Transformer Encoders**:
-   - Two separate encoders (one for photos, one for faces) aggregate embeddings.
-   - Input: CLS token + sequence of embeddings [batch, 10, 512] (CLS + up to 9 photos/faces).
-   - Uses self-attention (4 layers, 8 heads) with padding masks to ignore invalid inputs.
-   - Output: Aggregated vector from the encoded CLS token [batch, 512].
-   - **Technical Choice**: Transformers treat inputs as sets, enabling context-aware aggregation. No positional encodings ensure permutation invariance—a key "hidden gem" where shuffling photos (with masks) yields identical outputs.
-   - **Peculiarity**: Masks handle variable lengths (e.g., 3 photos + 6 faces); attention ignores padding, focusing on relevant data.
-
-4. **MLP Head**:
-   - Concatenates photo and face vectors [batch, 1024] and regresses to 9-class logits via a 2-layer MLP (1024 → 512 → 9).
-   - **Technical Choice**: Simple non-linear fusion; dropout (0.2) for regularization.
-
-**Data Flow Summary**:
-
-- Inputs: `photos_tensor` [B,9,3,224,224], `photos_mask` [B,9], `faces_tensor` [B,9,3,224,224], `faces_mask` [B,9].
-- Flatten & Extract: Per-image features via `MobileNetV3` + pooling → [B,9,960].
-- Project: → [B,9,512].
-- Aggregate: Prepend CLS, encode with transformer (masked) → [B,512] per branch.
-- Fuse & Predict: Concat → MLP → [B,9] logits.
-
-The model is permutation-invariant because transformers use attention (no order bias) and masks ensure only valid inputs matter.
-
-## Peculiarities and Hidden Gems
-
-- **Variable Inputs**: Up to 9 photos/faces; fewer are padded with zeros and masked (False in mask). This allows flexibility without fixed-size assumptions.
-- **Permutation Invariance**: No positional encodings in transformers—photos can be shuffled without changing outputs. Tested via randomization: outputs match in eval mode (dropout disabled).
-- **Separate Photo/Face Processing**: Enables different contributions (e.g., photos for composition, faces for details), even if counts differ.
-- **Classification Over Regression**: Switched to classification (scores 1-9 → classes 0-8) for better handling discrete scores; uses cross-entropy loss.
-- **Class Imbalance Handling**: Computes inverse-frequency weights; caps to avoid instability.
-- **Fine-Tuning Strategy**: Unfreeze later `MobileNetV3` layers; use AdamW, cosine annealing scheduler, label smoothing, mixed precision, and early stopping for SOTA performance on expanded datasets.
+- **Three Model Architectures**: MobileNet+Transformer (balanced), ViT+ArcFace (SOTA), Lightweight CPU (efficient)
+- **Permutation Invariant**: Photo order doesn't affect predictions
+- **Variable-Length Inputs**: Handle 1-9 photos per person with automatic masking
+- **Modern Training Pipeline**: AMP, gradient accumulation, callbacks, early stopping
+- **Production Ready**: ONNX/TorchScript export, quantization support
+- **Type-Safe Configuration**: Pydantic-based config with YAML support
 
 ## Installation
 
-1. Clone the repository:
+```bash
+# Clone the repository
+git clone https://github.com/alessiosavi/BeautyScorer.git
+cd BeautyScorer
 
-   ```bash
-   git clone https://github.com/alessiosavi/BeautyScorer.git
-   cd BeautyScorer
-   ```
+# Install in development mode
+pip install -e .
 
-2. Install dependencies:
+# Or install with all extras
+pip install -e ".[all]"
+```
 
-   ```bash
-   pip install torch torchvision pandas tqdm scikit-learn
-   ```
+### Requirements
 
-## Usage
+- Python 3.10+
+- PyTorch 2.0+
+- CUDA 11.8+ (optional, for GPU training)
 
-### Preprocessing
+## Quick Start
 
-Use `load_data` to load and normalize images.
+### Training
+
+```bash
+# Train with default configuration (MobileNet+Transformer)
+python scripts/train.py --config configs/default.yaml
+
+# Train CPU-optimized model
+python scripts/train.py --config configs/cpu_training.yaml
+
+# Train advanced ViT model
+python scripts/train.py --config configs/advanced_model.yaml
+```
 
 ### Inference
 
-```python
-CONF = utils.load_conf("conf.yaml")[0]
-model = BeautyScoreModel(conf = CONF)
-model.load_state_dict(torch.load('model_v8_classes_big_finetuned_state_dict.pt', weights_only=True))
+```bash
+# Predict from photos
+python scripts/infer.py --model outputs/checkpoints/best.pt --photos photo1.jpg photo2.jpg
 
-score, probability = score_person(person_id, model)
-print(
-    f"Person: {person_id} -> Score: {score} | Prob: {probability} | RealScore: {batch['scores'][idx]}"
-)
-utils.show_person(person_id, 1)
+# Predict from folder
+python scripts/infer.py --model outputs/checkpoints/best.pt --folder /path/to/photos/
 ```
 
-### Training/Fine-Tuning
-
-See `train()` function for full script. Example:
+### Python API
 
 ```python
-CONF = utils.load_conf("conf.yaml")[0]
-new_data = [{"id": "person1", "score": 5, "photos": glob("path/to/person1/*")}, ...]
-raw_ds = dataset.BeautyDataset(raw_dataset)
-raw_dl = DataLoader(
-    raw_ds,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    pin_memory=True,
-    collate_fn=raw_ds.collate_fn,
-)
-model = BeautyScoreModel(conf = CONF)
-model_params = list(filter(lambda p: p.requires_grad, model.parameters()))
+from beauty_scorer import BeautyPredictor, create_model, Trainer
+from beauty_scorer.config import load_config
 
-class_weights = utils.compute_class_weights(df)
-criterion = nn.CrossEntropyLoss(weight=class_weights.to(device), label_smoothing=0.1)
-optimizer = optim.AdamW(model_params, lr=lr, weight_decay=1e-2)
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
-train(model, raw_dl)
+# Inference
+predictor = BeautyPredictor("model.pt")
+result = predictor.predict_person(["photo1.jpg", "photo2.jpg"])
+print(f"Score: {result['score']}, Confidence: {result['confidence']:.1%}")
+
+# Training
+config = load_config("configs/default.yaml")
+model = create_model(config=config.model)
+trainer = Trainer(model, train_loader, val_loader, config=config)
+results = trainer.fit()
 ```
 
-## Training Details
+## Model Architectures
 
-- **Dataset**: List of dicts with ID, score (1-9), and photo paths.
-- **Loss**: CrossEntropyLoss with weights and label smoothing (0.1).
-- **Optimizer**: AdamW (lr=1e-5, weight_decay=0.01).
-- **Scheduler**: CosineAnnealingLR.
-- **Other**: Mixed precision (AMP), early stopping (patience=3).
+### 1. MobileNet + Transformer (Default)
+
+Balanced architecture for most use cases:
+
+- MobileNetV3-Large backbone with optional fine-tuning
+- Transformer encoders for sequence aggregation
+- Cross-attention fusion between photo and face streams
+- SE-attention in classification head
+
+```yaml
+model:
+  architecture: mobilenet_transformer
+  embed_dim: 512
+  num_encoder_layers: 4
+```
+
+### 2. ViT + ArcFace (Advanced)
+
+State-of-the-art for maximum accuracy:
+
+- DINOv2 or ViT backbone with self-supervised features
+- Attention-based pooling
+- Higher resolution support (384x384)
+
+```yaml
+model:
+  architecture: vit_arcface
+  backbone: dinov2_vits14
+  embed_dim: 768
+```
+
+### 3. Lightweight CPU (Efficient)
+
+Optimized for CPU training and inference:
+
+- MobileNetV2/EfficientNet-Lite backbone (no SE blocks)
+- Simple pooling instead of transformers
+- INT8 quantization support
+
+```yaml
+model:
+  architecture: lightweight_cpu
+  backbone: mobilenet_v2
+  embed_dim: 256
+```
+
+## Model Comparison
+
+| Model | Params | Speed (GPU) | Speed (CPU) | Best For |
+|-------|--------|-------------|-------------|----------|
+| MobileNet+Transformer | ~15M | Fast | Medium | General use |
+| ViT+ArcFace | ~90M | Medium | Slow | Maximum accuracy |
+| Lightweight CPU | ~5M | Very Fast | Fast | Edge deployment |
+
+## Configuration
+
+All settings are controlled via YAML files with Pydantic validation:
+
+```yaml
+model:
+  architecture: mobilenet_transformer
+  backbone: mobilenet_v3_large
+  embed_dim: 512
+  num_encoder_layers: 4
+  num_heads: 8
+  dropout: 0.2
+  num_classes: 9
+  use_cross_attention: true
+  use_se_attention: true
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 50
+  patience: 5
+  label_smoothing: 0.1
+  use_amp: true
+
+data:
+  image_size: [224, 224]
+  max_photos: 9
+  augmentation: true
+  face_detector: yolov8
+```
+
+## Project Structure
+
+```text
+beauty_scorer/
+├── pyproject.toml          # Package configuration
+├── configs/                # YAML configuration files
+│   ├── default.yaml
+│   ├── cpu_training.yaml
+│   └── advanced_model.yaml
+├── beauty_scorer/          # Main package
+│   ├── config.py           # Pydantic configuration
+│   ├── data/               # Dataset and preprocessing
+│   ├── models/             # Model architectures
+│   │   ├── components/     # Encoders, heads, backbones
+│   │   ├── mobilenet_transformer.py
+│   │   ├── vit_arcface.py
+│   │   └── lightweight_cnn.py
+│   ├── training/           # Training pipeline
+│   │   ├── trainer.py
+│   │   ├── losses.py
+│   │   ├── metrics.py
+│   │   └── callbacks.py
+│   ├── inference/          # Inference and export
+│   └── utils/              # Utilities
+├── scripts/                # CLI scripts
+└── tests/                  # Unit tests
+```
+
+## Dataset Format
+
+The dataset CSV should have columns:
+
+- `folder_name`: Directory name containing person's photos
+- `score`: Beauty score (1-9)
+
+```csv
+folder_name,score
+person_001,7
+person_002,5
+person_003,8
+```
+
+Images are loaded from: `{base_path}/{folder_name}/*.jpg`
+
+## Model Export
+
+```bash
+# Export to ONNX
+python scripts/export_model.py --model outputs/best.pt --format onnx
+
+# Export to TorchScript
+python scripts/export_model.py --model outputs/best.pt --format torchscript
+
+# Export quantized model
+python scripts/export_model.py --model outputs/best.pt --format quantized
+```
+
+## Evaluation
+
+```bash
+python scripts/evaluate.py \
+  --model outputs/best.pt \
+  --data datasets/test.csv \
+  --data-path datasets/images \
+  --output eval_results
+```
+
+Outputs:
+
+- `metrics.json`: Accuracy, MAE, RMSE, within-1/2 accuracy
+- `confusion_matrix.png`: Visualization
+- `predictions.json`: Per-sample predictions
+
+## Key Features Explained
+
+### Permutation Invariance
+
+The model treats photos as an unordered set - shuffling photos produces the same result:
+
+```python
+model.eval()
+output1 = model(photos, mask, faces, face_mask)
+output2 = model(photos[:, perm], mask[:, perm], faces[:, perm], face_mask[:, perm])
+assert torch.allclose(output1, output2)  # True!
+```
+
+### Cross-Attention Fusion
+
+Photo and face streams attend to each other before final aggregation, allowing the model to learn correlations between full-body appearance and facial features.
+
+### Class Weights
+
+Automatically computed inverse-frequency weights handle imbalanced score distributions:
+
+```python
+from beauty_scorer.data.dataset import compute_class_weights
+weights = compute_class_weights(train_data, num_classes=9)
+```
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/test_models.py -v
+
+# Run with coverage
+pytest tests/ --cov=beauty_scorer --cov-report=html
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Run `pytest` and `ruff check`
+5. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@software{beautyscorer2025,
+  title = {BeautyScorer: Transformer-based Beauty Score Prediction},
+  year = {2025},
+  url = {https://github.com/alessiosvi/BeautyScorer}
+}
+```
 
 ## Acknowledgments
 
-- Built with PyTorch and torchvision.
-- Inspired by transformer-based set aggregation (e.g., BERT-like CLS token).
-
-For issues, open a GitHub issue. Contributions welcome!
+- Built with PyTorch, timm, and Albumentations
+- Face detection powered by DeepFace
+- Inspired by transformer-based set aggregation methods

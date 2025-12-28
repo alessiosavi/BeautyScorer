@@ -1,0 +1,145 @@
+/* Extra CSS for BeautyScorer documentation */
+
+/* Code block styling */
+.codehilite {
+    background-color: #f8f8f8;
+    border-radius: 4px;
+    padding: 0.5em;
+    margin: 1em 0;
+}
+
+.codehilite pre {
+    margin: 0;
+    padding: 0;
+}
+
+/* Inline code styling */
+code {
+    background-color: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+/* Admonition styling */
+.admonition {
+    border-radius: 4px;
+    margin: 1em 0;
+}
+
+.admonition.note {
+    border-left-color: #448aff;
+}
+
+.admonition.warning {
+    border-left-color: #ff9100;
+}
+
+.admonition.danger {
+    border-left-color: #ff5252;
+}
+
+.admonition.tip {
+    border-left-color: #00c853;
+}
+
+/* Table styling */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+table th,
+table td {
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+table th {
+    background-color: #f5f5f5;
+    font-weight: bold;
+}
+
+table tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+/* Navigation improvements */
+.wy-nav-content {
+    max-width: 900px;
+}
+
+/* Header styling */
+h1, h2, h3, h4 {
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+h1 {
+    border-bottom: 2px solid #2980b9;
+    padding-bottom: 0.3em;
+}
+
+h2 {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.2em;
+}
+
+/* Link styling */
+a {
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* API reference styling */
+.function-signature {
+    font-family: monospace;
+    background-color: #f8f8f8;
+    padding: 10px;
+    border-left: 3px solid #2980b9;
+    margin: 1em 0;
+}
+
+.parameter-list {
+    margin-left: 2em;
+}
+
+.parameter-list dt {
+    font-weight: bold;
+    font-family: monospace;
+}
+
+.parameter-list dd {
+    margin-bottom: 0.5em;
+}
+
+/* Version badge */
+.version-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background-color: #2980b9;
+    color: white;
+    border-radius: 3px;
+    font-size: 0.8em;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .wy-nav-content {
+        padding: 1em;
+    }
+
+    table {
+        font-size: 0.9em;
+    }
+}
