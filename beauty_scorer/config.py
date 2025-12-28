@@ -129,6 +129,25 @@ class DataConfig(BaseModel):
         default=(0.229, 0.224, 0.225),
         description="Normalization std (ImageNet default)",
     )
+    # Sampling configuration
+    sample_size: float | int | None = Field(
+        default=None,
+        description=(
+            "Dataset sample size. Float (0-1) = fraction of data, "
+            "int >= 1 = absolute count, None = use all data"
+        ),
+    )
+    balance_classes: bool = Field(
+        default=False,
+        description="Balance class distribution when sampling",
+    )
+    balance_strategy: Literal["undersample", "sqrt", "proportional"] = Field(
+        default="undersample",
+        description=(
+            "Strategy for balancing: 'undersample' caps each class equally, "
+            "'sqrt' uses square root weighting, 'proportional' maintains ratios"
+        ),
+    )
 
     @field_validator("image_size", "face_size", mode="before")
     @classmethod

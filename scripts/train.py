@@ -21,7 +21,9 @@ from beauty_scorer.config import BeautyConfig, load_config
 from beauty_scorer.data.dataset import (
     compute_class_weights,
     create_data_loaders,
+    get_class_distribution,
     load_dataset_from_csv,
+    sample_balanced_dataset,
     train_val_split,
 )
 from beauty_scorer.models.factory import create_model
@@ -111,6 +113,29 @@ def parse_args():
         help="Device to train on (auto, cuda, cpu, mps)",
     )
 
+    # Sampling
+    parser.add_argument(
+        "--sample-size",
+        type=str,
+        default=None,
+        help=(
+            "Sample size for dataset. Use float (0-1) for percentage (e.g., '0.1' = 10%%), "
+            "or int for absolute count (e.g., '1000'). Overrides config."
+        ),
+    )
+    parser.add_argument(
+        "--balance-classes",
+        action="store_true",
+        help="Balance class distribution when sampling",
+    )
+    parser.add_argument(
+        "--balance-strategy",
+        type=str,
+        choices=["undersample", "sqrt", "proportional"],
+        default=None,
+        help="Strategy for class balancing (overrides config)",
+    )
+
     # Other
     parser.add_argument(
         "--seed",
@@ -155,6 +180,18 @@ def main():
     if args.output_dir:
         config.paths.output_dir = args.output_dir
 
+    # Apply sampling overrides
+    if args.sample_size is not None:
+        # Parse sample_size: float if contains '.', else int
+        if "." in args.sample_size:
+            config.data.sample_size = float(args.sample_size)
+        else:
+            config.data.sample_size = int(args.sample_size)
+    if args.balance_classes:
+        config.data.balance_classes = True
+    if args.balance_strategy:
+        config.data.balance_strategy = args.balance_strategy
+
     # Setup logging
     output_dir = Path(config.paths.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -177,6 +214,27 @@ def main():
         base_path=config.paths.dataset_base_path,
     )
     logger.info(f"Loaded {len(data)} samples")
+
+    # Apply dataset sampling if configured
+    if config.data.sample_size is not None or config.data.balance_classes:
+        logger.info(
+            f"Sampling dataset: size={config.data.sample_size}, "
+            f"balance={config.data.balance_classes}, "
+            f"strategy={config.data.balance_strategy}"
+        )
+        original_dist = get_class_distribution(data)
+        logger.info(f"Original class distribution: {original_dist}")
+
+        data = sample_balanced_dataset(
+            data,
+            sample_size=config.data.sample_size,
+            balance_classes=config.data.balance_classes,
+            balance_strategy=config.data.balance_strategy,
+            seed=config.training.seed,
+        )
+
+        sampled_dist = get_class_distribution(data)
+        logger.info(f"Sampled class distribution: {sampled_dist}")
 
     # Split data
     train_data, val_data = train_val_split(

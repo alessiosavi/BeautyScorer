@@ -48,6 +48,10 @@ data:
   face_confidence_threshold: 0.5
   normalize_mean: [0.485, 0.456, 0.406]
   normalize_std: [0.229, 0.224, 0.225]
+  # Dataset sampling (optional - for quick experiments or class balancing)
+  # sample_size: 0.1  # Use 10% of data (float 0-1) or absolute count (int)
+  # balance_classes: true  # Balance class distribution when sampling
+  # balance_strategy: undersample  # 'undersample', 'sqrt', or 'proportional'
 
 paths:
   dataset_file: data/dataset.csv

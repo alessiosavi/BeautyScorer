@@ -412,3 +412,232 @@ def compute_class_weights(
     weights = torch.clamp(weights, max=max_weight)
 
     return weights
+
+
+def sample_balanced_dataset(
+    data: list[dict],
+    sample_size: int | float | None = None,
+    balance_classes: bool = True,
+    balance_strategy: str = "undersample",
+    min_samples_per_class: int = 1,
+    seed: int = 42,
+) -> list[dict]:
+    """
+    Sample a subset of the dataset with optional class balancing.
+
+    This function is useful for:
+    - Quick experimentation with smaller datasets
+    - Reducing training time while maintaining class representation
+    - Handling class imbalance by undersampling majority classes
+    - Creating balanced mini-datasets for debugging or prototyping
+
+    Args:
+        data: Full dataset list with 'score' key for each item.
+        sample_size: Target sample size.
+            - If float in (0.0, 1.0]: fraction of total data (e.g., 0.1 = 10%)
+            - If int >= 1: absolute number of samples
+            - If None: use all data (only balance if balance_classes=True)
+        balance_classes: If True, attempts to balance class distribution.
+            Each class will have roughly equal representation, limited by
+            the smallest class size or the balance_strategy.
+        balance_strategy: Strategy for balancing classes.
+            - "undersample": Cap each class to target_per_class samples.
+              Ensures balanced classes but may lose data from majority classes.
+            - "sqrt": Use square root of original counts as weights. Reduces
+              imbalance while preserving more majority class data.
+            - "proportional": Maintain original distribution ratios but with
+              guaranteed minimum representation per class.
+        min_samples_per_class: Minimum samples to keep per class when possible.
+            Ensures very small classes aren't completely dropped.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Sampled dataset list.
+
+    Example:
+        >>> # Sample 10% of data with balanced classes
+        >>> sampled = sample_balanced_dataset(data, sample_size=0.1, balance_classes=True)
+
+        >>> # Sample exactly 1000 items with balanced classes
+        >>> sampled = sample_balanced_dataset(data, sample_size=1000, balance_classes=True)
+
+        >>> # Sample 20% maintaining original class distribution
+        >>> sampled = sample_balanced_dataset(data, sample_size=0.2, balance_classes=False)
+
+        >>> # Just balance classes without reducing total size
+        >>> sampled = sample_balanced_dataset(data, sample_size=None, balance_classes=True)
+
+        >>> # Use sqrt balancing for gentler rebalancing
+        >>> sampled = sample_balanced_dataset(
+        ...     data, sample_size=0.5, balance_classes=True, balance_strategy="sqrt"
+        ... )
+    """
+    if not data:
+        return []
+
+    random.seed(seed)
+
+    # Group data by class (score)
+    class_groups: dict[int, list[dict]] = {}
+    for item in data:
+        score = item["score"]
+        if score not in class_groups:
+            class_groups[score] = []
+        class_groups[score].append(item)
+
+    num_classes = len(class_groups)
+    total_data = len(data)
+
+    # Determine target total samples
+    if sample_size is None:
+        target_total = total_data
+    elif isinstance(sample_size, float) and 0 < sample_size <= 1.0:
+        target_total = max(1, int(total_data * sample_size))
+    elif isinstance(sample_size, (int, float)) and sample_size >= 1:
+        target_total = max(1, min(int(sample_size), total_data))
+    else:
+        raise ValueError(
+            f"sample_size must be float in (0, 1], int >= 1, or None. Got: {sample_size}"
+        )
+
+    # Log class distribution before sampling
+    class_counts = {cls: len(items) for cls, items in sorted(class_groups.items())}
+    logger.debug(f"Original class distribution: {class_counts}")
+
+    if not balance_classes:
+        # Simple random sampling without balancing
+        if target_total >= total_data:
+            sampled = data.copy()
+        else:
+            sampled = random.sample(data, target_total)
+        random.shuffle(sampled)
+        logger.info(
+            f"Sampled {len(sampled)} items without balancing "
+            f"({len(sampled)/total_data*100:.1f}% of {total_data})"
+        )
+        return sampled
+
+    # Balanced sampling
+    sampled: list[dict] = []
+
+    if balance_strategy == "undersample":
+        # Find the smallest class size for true balancing
+        min_class_size = min(len(items) for items in class_groups.values())
+
+        # Determine target per class based on mode:
+        # - If sample_size specified: balance within the budget (target_total / num_classes)
+        # - If sample_size=None (balance only): use min class size for true balancing
+        if sample_size is None:
+            # Balance-only mode: undersample all classes to match smallest
+            target_per_class = max(min_samples_per_class, min_class_size)
+            # Also cap total to balanced amount
+            target_total = target_per_class * num_classes
+        else:
+            # Size-limited mode: distribute budget evenly
+            ideal_per_class = target_total // num_classes
+            target_per_class = max(min_samples_per_class, min(ideal_per_class, min_class_size))
+
+        # Sample up to target_per_class from each class
+        remaining_quota = target_total
+        sorted_classes = sorted(class_groups.keys())
+
+        for cls in sorted_classes:
+            items = class_groups[cls]
+            n_available = len(items)
+
+            # Take min of target and available
+            n_samples = min(target_per_class, n_available, remaining_quota)
+            n_samples = max(n_samples, min(min_samples_per_class, n_available))
+
+            if n_samples > 0:
+                sampled.extend(random.sample(items, n_samples))
+                remaining_quota -= n_samples
+
+        # Second pass: if we have remaining quota (only when sample_size was specified),
+        # fill from larger classes to hit target
+        if remaining_quota > 0 and sample_size is not None:
+            sampled_ids = {item["id"] for item in sampled}
+            remaining_items = []
+            for items in class_groups.values():
+                for item in items:
+                    if item["id"] not in sampled_ids:
+                        remaining_items.append(item)
+
+            if remaining_items:
+                extra = random.sample(remaining_items, min(remaining_quota, len(remaining_items)))
+                sampled.extend(extra)
+
+    elif balance_strategy == "sqrt":
+        # Use square root of counts to determine sampling weights
+        # This reduces imbalance while preserving more majority class data
+        sqrt_counts = {cls: np.sqrt(len(items)) for cls, items in class_groups.items()}
+        total_sqrt = sum(sqrt_counts.values())
+
+        # Calculate target samples per class based on sqrt weights
+        for cls in sorted(class_groups.keys()):
+            items = class_groups[cls]
+            weight = sqrt_counts[cls] / total_sqrt
+            n_samples = max(
+                min_samples_per_class,
+                min(int(target_total * weight), len(items)),
+            )
+            sampled.extend(random.sample(items, n_samples))
+
+        # Adjust to hit target
+        if len(sampled) > target_total:
+            sampled = random.sample(sampled, target_total)
+
+    elif balance_strategy == "proportional":
+        # Maintain original distribution but ensure minimum representation
+        for cls in sorted(class_groups.keys()):
+            items = class_groups[cls]
+            proportion = len(items) / total_data
+            n_samples = max(
+                min_samples_per_class,
+                min(int(target_total * proportion), len(items)),
+            )
+            sampled.extend(random.sample(items, n_samples))
+
+        # Adjust to hit target
+        if len(sampled) > target_total:
+            sampled = random.sample(sampled, target_total)
+
+    else:
+        raise ValueError(
+            f"Unknown balance_strategy: {balance_strategy}. "
+            f"Choose from: 'undersample', 'sqrt', 'proportional'"
+        )
+
+    random.shuffle(sampled)
+
+    # Log resulting distribution
+    result_counts: dict[int, int] = {}
+    for item in sampled:
+        score = item["score"]
+        result_counts[score] = result_counts.get(score, 0) + 1
+    result_counts = dict(sorted(result_counts.items()))
+
+    logger.info(
+        f"Sampled {len(sampled)} items with '{balance_strategy}' balancing "
+        f"({len(sampled)/total_data*100:.1f}% of {total_data})"
+    )
+    logger.debug(f"Balanced class distribution: {result_counts}")
+
+    return sampled
+
+
+def get_class_distribution(data: list[dict]) -> dict[int, int]:
+    """
+    Get the class distribution of a dataset.
+
+    Args:
+        data: Dataset list with 'score' key.
+
+    Returns:
+        Dictionary mapping score to count.
+    """
+    distribution: dict[int, int] = {}
+    for item in data:
+        score = item["score"]
+        distribution[score] = distribution.get(score, 0) + 1
+    return dict(sorted(distribution.items()))
