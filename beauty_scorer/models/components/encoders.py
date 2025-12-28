@@ -395,6 +395,17 @@ class LightweightAttention(nn.Module):
         Returns:
             Pooled representation (batch, embed_dim).
         """
+        # Handle empty mask case (no valid tokens) by falling back to mean pooling
+        if mask is not None:
+            # Check for samples with no valid tokens
+            valid_counts = mask.sum(dim=1)
+            all_invalid = valid_counts == 0
+            if all_invalid.any():
+                # For samples with no valid tokens, use mean pooling
+                output = x.mean(dim=1)
+                output = self.norm(output)
+                return output
+
         q = self.query(x.mean(dim=1, keepdim=True))  # Global query
         k = self.key(x)
         v = self.value(x)

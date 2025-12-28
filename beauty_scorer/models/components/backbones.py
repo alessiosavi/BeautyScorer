@@ -170,7 +170,7 @@ def _efficientnet_b0(pretrained: bool = True, **kwargs) -> nn.Module:
 
 @BackboneRegistry.register(
     "efficientnet_lite0",
-    feature_dim=1280,
+    feature_dim=320,  # EfficientNet-Lite0 outputs 320 features (not 1280 like regular B0)
     input_size=224,
     family="efficientnet",
     description="EfficientNet-Lite0 - optimized for CPU/mobile",

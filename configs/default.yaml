@@ -51,13 +51,13 @@ data:
 
 paths:
   dataset_file: datasets/beauty_dataset.csv
-  dataset_base_path: datasets/images
+  dataset_base_path: /opt/SP/DATA/beauty_dataset
   output_dir: outputs
   checkpoint_path:
   export_dir: exports
 
 logging:
-  log_level: INFO
+  log_level: DEBUG
   log_dir: logs
   use_tensorboard: true
   use_wandb: false

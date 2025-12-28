@@ -141,9 +141,12 @@ class FaceExtractor:
             else:
                 image = image.astype(np.uint8)
 
-        # Use DeepFace if available
+        # Use DeepFace if available, with OpenCV fallback
         if self.deepface_available:
-            return self._extract_deepface(image)
+            result = self._extract_deepface(image)
+            if result is not None:
+                return result
+            # Fall through to OpenCV if DeepFace failed
 
         # Fallback to OpenCV
         return self._extract_opencv(image)
