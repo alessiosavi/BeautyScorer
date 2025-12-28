@@ -166,6 +166,14 @@ class ViTArcFaceModel(BaseBeautyModel):
             dropout=self.config.dropout,
         )
 
+        # Learnable embeddings for missing faces/photos
+        # When a sample has no valid faces, use this learned embedding instead
+        # This allows the model to learn a meaningful representation for "no face detected"
+        self.no_face_embedding = nn.Parameter(torch.zeros(embed_dim))
+        self.no_photo_embedding = nn.Parameter(torch.zeros(embed_dim))
+        nn.init.normal_(self.no_face_embedding, std=0.02)
+        nn.init.normal_(self.no_photo_embedding, std=0.02)
+
         # Initialize weights
         self._init_weights()
 
@@ -255,12 +263,20 @@ class ViTArcFaceModel(BaseBeautyModel):
         if self.face_pos_enc is not None:
             face_emb = self.face_pos_enc(face_emb)
 
-        # Self-attention
-        photo_padding_mask = ~photos_mask
-        face_padding_mask = ~faces_mask
+        # Self-attention with empty mask handling
+        # Check if any sample has all tokens masked (would cause NaN)
+        photos_has_valid = photos_mask.any(dim=1).all()
+        faces_has_valid = faces_mask.any(dim=1).all()
 
-        photo_emb = self.photo_self_attn(photo_emb, src_key_padding_mask=photo_padding_mask)
-        face_emb = self.face_self_attn(face_emb, src_key_padding_mask=face_padding_mask)
+        if photos_has_valid:
+            photo_padding_mask = ~photos_mask
+            photo_emb = self.photo_self_attn(photo_emb, src_key_padding_mask=photo_padding_mask)
+        # else: skip self-attention, keep photo_emb as-is (from projection)
+
+        if faces_has_valid:
+            face_padding_mask = ~faces_mask
+            face_emb = self.face_self_attn(face_emb, src_key_padding_mask=face_padding_mask)
+        # else: skip self-attention, keep face_emb as-is (from projection)
 
         # Cross-attention
         if self.cross_attention is not None:
@@ -269,6 +285,30 @@ class ViTArcFaceModel(BaseBeautyModel):
         # Attention pooling
         photo_vec = self.photo_pool(photo_emb, photos_mask)
         face_vec = self.face_pool(face_emb, faces_mask)
+
+        # Replace invalid vectors with learned embeddings
+        # This allows model to handle images without faces as valid information
+        batch_size = photos.size(0)
+        has_photos = photos_mask.any(dim=1)  # (batch,)
+        has_faces = faces_mask.any(dim=1)  # (batch,)
+
+        # Use learned embedding for samples without valid photos
+        if not has_photos.all():
+            no_photo_expanded = self.no_photo_embedding.unsqueeze(0).expand(batch_size, -1)
+            photo_vec = torch.where(
+                has_photos.unsqueeze(-1),
+                photo_vec,
+                no_photo_expanded,
+            )
+
+        # Use learned embedding for samples without valid faces
+        if not has_faces.all():
+            no_face_expanded = self.no_face_embedding.unsqueeze(0).expand(batch_size, -1)
+            face_vec = torch.where(
+                has_faces.unsqueeze(-1),
+                face_vec,
+                no_face_expanded,
+            )
 
         # Classify
         combined = torch.cat([photo_vec, face_vec], dim=1)

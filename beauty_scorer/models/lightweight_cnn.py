@@ -185,6 +185,14 @@ class LightweightCPUModel(BaseBeautyModel):
         self.quant = torch.ao.quantization.QuantStub()
         self.dequant = torch.ao.quantization.DeQuantStub()
 
+        # Learnable embeddings for missing faces/photos
+        # When a sample has no valid faces, use this learned embedding instead
+        # This allows the model to learn a meaningful representation for "no face detected"
+        self.no_face_embedding = nn.Parameter(torch.zeros(embed_dim))
+        self.no_photo_embedding = nn.Parameter(torch.zeros(embed_dim))
+        nn.init.normal_(self.no_face_embedding, std=0.02)
+        nn.init.normal_(self.no_photo_embedding, std=0.02)
+
         logger.info(
             f"LightweightCPUModel initialized: "
             f"backbone={backbone_name}, "
@@ -253,6 +261,30 @@ class LightweightCPUModel(BaseBeautyModel):
         else:
             photo_vec = self.photo_pool(photo_emb, photos_mask)
             face_vec = self.face_pool(face_emb, faces_mask)
+
+        # Replace invalid vectors with learned embeddings
+        # This allows model to handle images without faces as valid information
+        batch_size = photos.size(0)
+        has_photos = photos_mask.any(dim=1)  # (batch,)
+        has_faces = faces_mask.any(dim=1)  # (batch,)
+
+        # Use learned embedding for samples without valid photos
+        if not has_photos.all():
+            no_photo_expanded = self.no_photo_embedding.unsqueeze(0).expand(batch_size, -1)
+            photo_vec = torch.where(
+                has_photos.unsqueeze(-1),
+                photo_vec,
+                no_photo_expanded,
+            )
+
+        # Use learned embedding for samples without valid faces
+        if not has_faces.all():
+            no_face_expanded = self.no_face_embedding.unsqueeze(0).expand(batch_size, -1)
+            face_vec = torch.where(
+                has_faces.unsqueeze(-1),
+                face_vec,
+                no_face_expanded,
+            )
 
         # Classify
         combined = torch.cat([photo_vec, face_vec], dim=1)

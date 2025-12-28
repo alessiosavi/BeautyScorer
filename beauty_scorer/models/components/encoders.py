@@ -356,21 +356,56 @@ class AttentionPooling(nn.Module):
             Pooled representation (batch, embed_dim).
         """
         batch_size = x.size(0)
-        query = self.query.expand(batch_size, -1, -1)
+        embed_dim = x.size(-1)
 
-        # Convert mask format
-        key_mask = ~mask if mask is not None else None
+        # Check for samples with no valid tokens
+        if mask is not None:
+            has_valid = mask.any(dim=1)  # (batch,)
+            all_valid = has_valid.all()
+            any_invalid = (~has_valid).any()
+        else:
+            all_valid = True
+            any_invalid = False
 
-        # Apply attention
-        output, _ = self.attention(
-            query=query,
-            key=x,
-            value=x,
-            key_padding_mask=key_mask,
-        )
+        # Fast path: all samples have valid tokens
+        if all_valid:
+            query = self.query.expand(batch_size, -1, -1)
+            key_mask = ~mask if mask is not None else None
 
-        output = self.norm(output.squeeze(1))
-        return output
+            output, _ = self.attention(
+                query=query,
+                key=x,
+                value=x,
+                key_padding_mask=key_mask,
+            )
+            return self.norm(output.squeeze(1))
+
+        # Slow path: handle per-sample invalid masks
+        output = torch.zeros(batch_size, embed_dim, device=x.device, dtype=x.dtype)
+
+        # Process valid samples with attention
+        if has_valid.any():
+            valid_idx = has_valid.nonzero(as_tuple=True)[0]
+            x_valid = x[valid_idx]
+            mask_valid = mask[valid_idx]
+
+            query = self.query.expand(len(valid_idx), -1, -1)
+            key_mask = ~mask_valid
+
+            attn_out, _ = self.attention(
+                query=query,
+                key=x_valid,
+                value=x_valid,
+                key_padding_mask=key_mask,
+            )
+            output[valid_idx] = attn_out.squeeze(1)
+
+        # Process invalid samples with mean pooling
+        if any_invalid:
+            invalid_idx = (~has_valid).nonzero(as_tuple=True)[0]
+            output[invalid_idx] = x[invalid_idx].mean(dim=1)
+
+        return self.norm(output)
 
 
 class LightweightAttention(nn.Module):
